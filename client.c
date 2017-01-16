@@ -1,5 +1,6 @@
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <ctype.h>
+#include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdlib.h>
@@ -39,7 +40,7 @@ int main(int argc, char **argv) {
 
 	bzero(&servaddr, sizeof(servaddr));
 	servaddr.sin_family = AF_INET;
-	servaddr.sin_port = htons(DAYTIME_PORT); /* daytime server */
+	servaddr.sin_port = htons(port_num); /* daytime server */
 	
 	if (inet_pton(AF_INET, argv[1], &servaddr.sin_addr) <= 0) {
 		printf("inet_pton error for %s\n", argv[1]);

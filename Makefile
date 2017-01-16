@@ -8,4 +8,5 @@ all:
 	$(CC) $(CFLAGS) $(SOURCES) -o $(MAIN)
 
 clean:
-	rm $(OBJECTS) $(MAIN)
+	@rm -f $(OBJECTS) $(MAIN)
+	@rm -rf $(MAIN).dSYM
