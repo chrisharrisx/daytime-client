@@ -1,10 +1,11 @@
 CC = gcc
-CFLAGS = -std=c99
-FILES = client.c
-OBJECTS = client
+CFLAGS = -std=c99 -g -Wall
+SOURCES = client.c
+OBJECTS = $(SOURCES:.c=.o)
+MAIN = client
 
 all:
-	$(CC) $(CFLAGS) $(FILES) -o $(OBJECTS)
+	$(CC) $(CFLAGS) $(SOURCES) -o $(MAIN)
 
 clean:
-	rm $(OBJECTS)
+	rm $(OBJECTS) $(MAIN)
