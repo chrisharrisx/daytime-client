@@ -17,13 +17,14 @@
 #define SERVICEMAX 32
 
 int parse_args(int argc, char **argv, int port_num);
+void read_response(char *hostname, char *ip_address, int sockfd, char recvline[]);
 
 int main(int argc, char **argv) {
 	bool hostname_set = false;
 	char recvline[MAXLINE + 1];
 	char *hostname = malloc(HOSTMAX);
 	char *ip_address = malloc(IPMAX);
-	int sockfd, n;
+	int sockfd;
 	int port_num = -1;
 	struct sockaddr_in servaddr;
 
@@ -83,23 +84,7 @@ int main(int argc, char **argv) {
 		getnameinfo((struct sockaddr *) &servaddr, sizeof(servaddr), hostname, HOSTMAX, service_type, SERVICEMAX, 0);
 	}
 
-	printf("Server Name: %s\n", hostname);
-	printf("IP Address: %s\n", ip_address);
-	printf("Time: ");
-
-	while ((n = read(sockfd, recvline, MAXLINE)) > 0) {
-		recvline[n] = 0; /* null terminate */
-		
-		if (fputs(recvline, stdout) == EOF) {
-			printf("fputs error\n");
-			exit(1);
-		}
-	}
-
-	if (n < 0) {
-		printf("read error\n");
-		exit(1);
-	}
+	read_response(hostname, ip_address, sockfd, recvline);
 
 	exit(0);
 }
@@ -124,4 +109,26 @@ int parse_args(int argc, char **argv, int port_num) {
   }
 
   return port_num;
+}
+
+void read_response(char *hostname, char *ip_address, int sockfd, char recvline[]) {
+	printf("Server Name: %s\n", hostname);
+	printf("IP Address: %s\n", ip_address);
+	printf("Time: ");
+
+	int n;
+
+	while ((n = read(sockfd, recvline, MAXLINE)) > 0) {
+		recvline[n] = 0; /* null terminate */
+		
+		if (fputs(recvline, stdout) == EOF) {
+			printf("fputs error\n");
+			exit(1);
+		}
+	}
+
+	if (n < 0) {
+		printf("read error\n");
+		exit(1);
+	}
 }
