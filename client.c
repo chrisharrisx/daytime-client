@@ -15,21 +15,35 @@
 #define HOSTMAX 255
 #define IPMAX 128
 #define SERVICEMAX 32
+#define DESTINATION 1
+#define PORT 2
+#define SECONDARY_DESTINATION 3
+#define SECONDARY_PORT 4
 
-int parse_args(int argc, char **argv, int port_num);
-void read_response(char *hostname, char *ip_address, int sockfd, char recvline[]);
+void parse_args(int, char **, int *, char **, char **, bool *);
+bool validate_portnumber(char **, int);
+void get_ip_from_hostname(char *, char *);
+void read_response(char *, char *, int, char []);
 
 int main(int argc, char **argv) {
 	bool hostname_set = false;
+	char buff[MAXLINE];
 	char recvline[MAXLINE + 1];
-	char *hostname = malloc(HOSTMAX);
-	char *ip_address = malloc(IPMAX);
+	char *hostname = (char *) malloc(HOSTMAX);
+	// char *secondary_hostname = (char *) malloc(HOSTMAX);
+	char *ip_address = (char *) malloc(IPMAX);
 	int sockfd;
 	int port_num = -1;
+	// int secondary_port_num = -1;
 	struct sockaddr_in servaddr;
 
-	port_num = parse_args(argc, argv, port_num);
+	if (argc != 3 && argc != 5) {
+		printf("usage: client [<tunnel name/ip> <tunnel port>] <server name/ip> <server port>\n");
+		exit(1);
+	}
+	parse_args(argc, argv, &port_num, &ip_address, &hostname, &hostname_set);
 
+	// Create socket
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		printf("socket error\n");
 		exit(1);
@@ -39,76 +53,92 @@ int main(int argc, char **argv) {
 	servaddr.sin_family = AF_INET;
 	servaddr.sin_port = htons(port_num); /* daytime server */
 
-	if (!isdigit(argv[1][0])) { // user specified a server name and port
-		hostname = argv[1];
-		hostname_set = true;
-
-		// get ip address from hostname
-		struct addrinfo info, *infoptr;
-		memset(&info, 0, sizeof(info));
-
-		int error = getaddrinfo(argv[1], NULL, &info, &infoptr);
-		if (error) {
-			fprintf(stderr, "getaddrinfo() error: %s\n", gai_strerror(error));
-			exit(1);
-		}
-
-		struct addrinfo *ptr;
-  	char ip[IPMAX], service[SERVICEMAX];
-
-  	for (ptr = infoptr; ptr != NULL; ptr = ptr->ai_next) {
-			getnameinfo(ptr->ai_addr, ptr->ai_addrlen, ip, IPMAX, service, SERVICEMAX, NI_NUMERICHOST);
-			ip_address = ip;
-  	}
-
-  	freeaddrinfo(infoptr);
-	}
-	else {	// user specified an ip address and port
-		ip_address = argv[1];
-	}
-
-	// copy ip address to servaddr struct
+	// Copy IP address to servaddr struct
 	if (inet_pton(AF_INET, ip_address, &servaddr.sin_addr) <= 0) {
-		printf("inet_pton error for %s\n", argv[1]);
+		printf("inet_pton error for %s\n", argv[DESTINATION]);
 		exit(1);
 	}
 
+	// Connect to socket
 	if (connect(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
 		printf("connect error\n");
 		exit(1);
 	}
 
-	// get hostname from ip address
+	// If IP address specified as destination, lookup hostname
 	if (!hostname_set) {
 		char service_type[SERVICEMAX];
 		getnameinfo((struct sockaddr *) &servaddr, sizeof(servaddr), hostname, HOSTMAX, service_type, SERVICEMAX, 0);
 	}
 
-	read_response(hostname, ip_address, sockfd, recvline);
+	if (argc == 3) { // Connect directly to server and wait for reply
+		read_response(hostname, ip_address, sockfd, recvline);
+	}
+	else { // Connect to tunnel, send server address and port, then wait for reply
+		puts("Connecting to tunnel...");
+		snprintf(buff, sizeof(buff), "%s %s\r\n", argv[SECONDARY_DESTINATION], argv[SECONDARY_PORT]);
+		write(sockfd, buff, strlen(buff));
+	}
 
 	exit(0);
 }
 
-int parse_args(int argc, char **argv, int port_num) {
-	if (argc != 3) {
-		printf("usage: client <IPaddress> <port number>\n");
+void parse_args(int argc, char **argv, int *port_num, char **ip_address, char **hostname, bool *hostname_set) {
+	if (validate_portnumber(argv, PORT)) {
+		*port_num = atoi(argv[PORT]);
+	}
+	else {
 		exit(1);
 	}
 
-	for (int i = 0; argv[2][i] != '\0'; i++) {
-    if (!isdigit(argv[2][i])) {
+	// set hostname and ip address for destination
+	if (!isdigit(argv[DESTINATION][0])) { 
+		*hostname = argv[DESTINATION];
+		*hostname_set = true;
+
+		// get ip address from hostname
+		get_ip_from_hostname(argv[DESTINATION], *ip_address);
+	}
+	else {	// user specified an ip address and port
+		*ip_address = argv[DESTINATION];
+	}
+}
+
+bool validate_portnumber(char **argv, int port_type) {
+	for (int i = 0; argv[port_type][i] != '\0'; i++) {
+    if (!isdigit(argv[port_type][i])) {
       puts("Port number must be an integer");
-      exit(1);
+      return false;
     }
   }
-  port_num = atoi(argv[2]);
+  int port = atoi(argv[port_type]);
 
-  if (port_num < 1024) {
+  if (port < 1024) {
     puts("Port number must be greater than 1024");
-    exit(1);
+    return false;
   }
 
-  return port_num;
+  return true;
+}
+
+void get_ip_from_hostname(char *dest, char *ip_address) {
+	struct addrinfo info, *infoptr;
+	memset(&info, 0, sizeof(info));
+
+	int error = getaddrinfo(dest, NULL, &info, &infoptr);
+	if (error) {
+		fprintf(stderr, "getaddrinfo() error: %s\n", gai_strerror(error));
+		exit(1);
+	}
+
+	struct addrinfo *ptr;
+	char service[SERVICEMAX];
+
+	for (ptr = infoptr; ptr != NULL; ptr = ptr->ai_next) {
+		getnameinfo(ptr->ai_addr, ptr->ai_addrlen, ip_address, IPMAX, service, SERVICEMAX, NI_NUMERICHOST);
+	}
+
+	freeaddrinfo(infoptr);
 }
 
 void read_response(char *hostname, char *ip_address, int sockfd, char recvline[]) {
