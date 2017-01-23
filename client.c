@@ -17,31 +17,34 @@
 #define SERVICEMAX 32
 #define DESTINATION 1
 #define PORT 2
-#define SECONDARY_DESTINATION 3
-#define SECONDARY_PORT 4
+#define SEC_DESTINATION 3
+#define SEC_PORT 4
+#define LISTENQ 1024 /* 2nd argument to listen() */
 
-void parse_args(int, char **, int *, char **, char **, bool *);
+void parse_args(int, char **, int, int, int *, char **, char **, bool *);
 bool validate_portnumber(char **, int);
 void get_ip_from_hostname(char *, char *);
-void read_response(char *, char *, int, char []);
+void read_response(char *, char *, int, int, char [], bool, char *, char *);
 
 int main(int argc, char **argv) {
 	bool hostname_set = false;
+	bool sec_hostname_set = false;
 	char buff[MAXLINE];
-	char recvline[MAXLINE + 1];
+	char recvline[MAXLINE];
 	char *hostname = (char *) malloc(HOSTMAX);
-	// char *secondary_hostname = (char *) malloc(HOSTMAX);
+	char *sec_hostname = (char *) malloc(HOSTMAX);
 	char *ip_address = (char *) malloc(IPMAX);
+	char *sec_ip_address = (char *) malloc(IPMAX);
 	int sockfd;
 	int port_num = -1;
-	// int secondary_port_num = -1;
+	int sec_port_num = -1;
 	struct sockaddr_in servaddr;
 
 	if (argc != 3 && argc != 5) {
 		printf("usage: client [<tunnel name/ip> <tunnel port>] <server name/ip> <server port>\n");
 		exit(1);
 	}
-	parse_args(argc, argv, &port_num, &ip_address, &hostname, &hostname_set);
+	parse_args(argc, argv, DESTINATION, PORT, &port_num, &ip_address, &hostname, &hostname_set);
 
 	// Create socket
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -72,35 +75,47 @@ int main(int argc, char **argv) {
 	}
 
 	if (argc == 3) { // Connect directly to server and wait for reply
-		read_response(hostname, ip_address, sockfd, recvline);
+		read_response(hostname, ip_address, sockfd, port_num, recvline, false, NULL, NULL);
 	}
 	else { // Connect to tunnel, send server address and port, then wait for reply
-		puts("Connecting to tunnel...");
-		snprintf(buff, sizeof(buff), "%s %s\r\n", argv[SECONDARY_DESTINATION], argv[SECONDARY_PORT]);
+		parse_args(argc, argv, SEC_DESTINATION, SEC_PORT, &sec_port_num, &sec_ip_address, &sec_hostname, &sec_hostname_set);
+
+		if (!sec_hostname_set) {
+			char service_type[SERVICEMAX];
+			getnameinfo((struct sockaddr *) &servaddr, sizeof(servaddr), sec_hostname, HOSTMAX, service_type, SERVICEMAX, 0);
+		}
+
+		snprintf(buff, sizeof(buff), "%s %s\r\n", argv[SEC_DESTINATION], argv[SEC_PORT]);
 		write(sockfd, buff, strlen(buff));
+
+		shutdown(sockfd, SHUT_WR);
+
+		read_response(hostname, ip_address, sockfd, port_num, recvline, true, sec_hostname, sec_ip_address);
 	}
 
 	exit(0);
 }
 
-void parse_args(int argc, char **argv, int *port_num, char **ip_address, char **hostname, bool *hostname_set) {
-	if (validate_portnumber(argv, PORT)) {
-		*port_num = atoi(argv[PORT]);
+void parse_args(int argc, char **argv, int destination, int destination_port, 
+	int *port_num, char **ip_address, char **hostname, bool *hostname_set) {
+	
+	if (validate_portnumber(argv, destination_port)) {
+		*port_num = atoi(argv[destination_port]);
 	}
 	else {
 		exit(1);
 	}
 
 	// set hostname and ip address for destination
-	if (!isdigit(argv[DESTINATION][0])) { 
-		*hostname = argv[DESTINATION];
+	if (!isdigit(argv[destination][0])) { 
+		*hostname = argv[destination];
 		*hostname_set = true;
 
 		// get ip address from hostname
-		get_ip_from_hostname(argv[DESTINATION], *ip_address);
+		get_ip_from_hostname(argv[destination], *ip_address);
 	}
 	else {	// user specified an ip address and port
-		*ip_address = argv[DESTINATION];
+		*ip_address = argv[destination];
 	}
 }
 
@@ -141,24 +156,31 @@ void get_ip_from_hostname(char *dest, char *ip_address) {
 	freeaddrinfo(infoptr);
 }
 
-void read_response(char *hostname, char *ip_address, int sockfd, char recvline[]) {
-	printf("Server Name: %s\n", hostname);
-	printf("IP Address: %s\n", ip_address);
-	printf("Time: ");
-
+void read_response(char *hostname, char *ip_address, int sockfd, int port_num, char recvline[], bool isTunnel,
+	char *sec_host, char *sec_ip) {
 	int n;
 
 	while ((n = read(sockfd, recvline, MAXLINE)) > 0) {
 		recvline[n] = 0; /* null terminate */
-		
-		if (fputs(recvline, stdout) == EOF) {
-			printf("fputs error\n");
-			exit(1);
-		}
 	}
 
 	if (n < 0) {
 		printf("read error\n");
 		exit(1);
+	}
+
+	if (isTunnel) {
+		printf("Server Name: %s\n", sec_host);
+		printf("IP Address: %s\n", sec_ip);
+		printf("Time: %s", recvline);
+
+		printf("Via Tunnel: %s\n", hostname);
+		printf("IP Address: %s\n", ip_address);
+		printf("Port Number: %d\n", port_num);
+	}
+	else {
+		printf("Server Name: %s\n", hostname);
+		printf("IP Address: %s\n", ip_address);
+		printf("Time: %s", recvline);
 	}
 }
